@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nail Salon Call Manager</title>
+  
+  <!-- Tailwind CSS & FontAwesome -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <!-- Google Fonts: Playfair Display & Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+
+  <!-- React & Babel CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Firebase Compatibility SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              cream: '#FAFAFA',
+              warmIvory: '#F9F8F6',
+              cardBg: '#FFFFFF',
+              charcoal: '#1E1E24',
+              softSlate: '#4A4A52',
+              gold: '#C5A059',
+              goldHover: '#B08C45',
+              lightGold: '#F7F3EB',
+              borderGold: '#E5D5B8',
+              borderLight: '#E8E8EC',
+            }
+          },
+          fontFamily: {
+            serif: ['"Playfair Display"', 'Georgia', 'serif'],
+            sans: ['"Inter"', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #FAFAFA;
+      color: #1E1E24;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .font-serif {
+      font-family: 'Playfair Display', Georgia, serif;
+    }
+
+    /* Subtle luxury scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #FAFAFA;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #D4AF37/40;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #C5A059;
+    }
+
+    /* Pulse border for Priority Banner */
+    @keyframes subtleGlow {
+      0%, 100% { border-color: rgba(197, 160, 89, 0.4); box-shadow: 0 2px 10px rgba(197, 160, 89, 0.08); }
+      50% { border-color: rgba(197, 160, 89, 0.9); box-shadow: 0 4px 16px rgba(197, 160, 89, 0.18); }
+    }
+    .priority-banner {
+      animation: subtleGlow 2.5s infinite ease-in-out;
+    }
+  </style>
+</head>
+<body class="min-h-screen selection:bg-brand-gold selection:text-white">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAN1beWGmS1lzgyyx-RHWwB5vro3GfrI_Q",
+      authDomain: "turntracker-1ab68.firebaseapp.com",
+      projectId: "turntracker-1ab68",
+      storageBucket: "turntracker-1ab68.firebasestorage.app",
+      messagingSenderId: "537033521288",
+      appId: "1:537033521288:web:ed42fa5013efe85695073d"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    const STORAGE_KEY = "nail-salon-call-system-v3";
+    const STATE_REF = db.collection("nailSalon").doc("board");
+    const ARCHIVE_COLLECTION = "nailSalonArchive";
+
+    const INITIAL_TECHNICIANS = [
+      { id: "anna", name: "Anna" },
+      { id: "dee", name: "Dee" },
+      { id: "tony", name: "Tony" },
+      { id: "lee", name: "Lee" },
+      { id: "q", name: "Q" },
+    ];
+
+    function todayString() {
+      const date = new Date();
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+
+    function createInitialData() {
+      return {
+        technicians: INITIAL_TECHNICIANS,
+        standby: [],
+        turnPosition: [],
+        starredIds: [],
+        history: [],
+        standbyVisible: true,
+        businessDate: todayString(),
+      };
+    }
+
+    function normalize(data) {
+      const initial = createInitialData();
+      const d = data || {};
+      return {
+        ...initial,
+        ...d,
+        technicians: Array.isArray(d.technicians) ? d.technicians : initial.technicians,
+        standby: Array.isArray(d.standby) ? d.standby : [],
+        turnPosition: Array.isArray(d.turnPosition) ? d.turnPosition : [],
+        starredIds: Array.isArray(d.starredIds) ? d.starredIds : [],
+        history: Array.isArray(d.history) ? d.history : [],
+      };
+    }
+
+    function readLocal() {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (!saved) return { state: createInitialData(), archive: [] };
+        const { archive, ...rest } = JSON.parse(saved);
+        return {
+          state: normalize(rest),
+          archive: Array.isArray(archive) ? archive : [],
+        };
+      } catch {
+        return { state: createInitialData(), archive: [] };
+      }
+    }
+
+    function archiveHistory(history) {
+      return (history || []).map(({ beforePosition, ...rest }) => rest);
+    }
+
+    function moveItem(list, index, direction) {
+      const result = [...list];
+      const destination = index + direction;
+      if (destination < 0 || destination >= result.length) return result;
+      [result[index], result[destination]] = [result[destination], result[index]];
+      return result;
+    }
+
+    function formatTime(timestamp) {
+      return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    }
+
+    function formatDate(timestamp) {
+      return new Date(timestamp).toLocaleDateString();
+    }
+
+    function App() {
+      const [data, setBoard] = useState(null);
+      const [archive, setArchive] = useState([]);
+      const [syncError, setSyncError] = useState(false);
+      const [newName, setNewName] = useState("");
+      const [editingId, setEditingId] = useState(null);
+      const [editingName, setEditingName] = useState("");
+      const [editingOrder, setEditingOrder] = useState(false);
+      const [confirmNewDay, setConfirmNewDay] = useState(false);
+      const [message, setMessage] = useState("");
+
+      useEffect(() => {
+        const stopBoard = STATE_REF.onSnapshot(
+          (snap) => {
+            setBoard(snap.exists ? normalize(snap.data()) : readLocal().state);
+            setSyncError(false);
+          },
+          (error) => {
+            console.error(error);
+            setSyncError(true);
+          }
+        );
+
+        const stopArchive = db.collection(ARCHIVE_COLLECTION).orderBy("createdAt", "desc").onSnapshot(
+          (snap) => setArchive(snap.docs.map((item) => item.data())),
+          (error) => console.error(error)
+        );
+
+        return () => {
+          stopBoard();
+          stopArchive();
+        };
+      }, []);
+
+      function setData(updater) {
+        db.runTransaction(async (tx) => {
+          const snap = await tx.get(STATE_REF);
+          let base = snap.exists ? normalize(snap.data()) : readLocal().state;
+          tx.set(STATE_REF, updater(base));
+        })
+        .then(() => setSyncError(false))
+        .catch((error) => {
+          console.error(error);
+          setSyncError(true);
+        });
+      }
+
+      function notify(text) {
+        setMessage(text);
+        window.setTimeout(() => setMessage(""), 2800);
+      }
+
+      function getTechnician(id, technicians = data.technicians) {
+        return technicians.find((tech) => tech.id === id);
+      }
+
+      function addTechnician(event) {
+        event.preventDefault();
+        const name = newName.trim();
+        if (!name) return notify("Please enter a technician name.");
+        if (data.technicians.some((tech) => tech.name.toLowerCase() === name.toLowerCase())) {
+          return notify("This technician already exists.");
+        }
+        const id = "tech-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+        setData((previous) => ({
+          ...previous,
+          technicians: [...previous.technicians, { id, name }],
+        }));
+        setNewName("");
+        notify(`${name} added.`);
+      }
+
+      function saveTechnicianName(id) {
+        const name = editingName.trim();
+        if (!name) return notify("Name cannot be empty.");
+        setData((previous) => ({
+          ...previous,
+          technicians: previous.technicians.map((tech) => (tech.id === id ? { ...tech, name } : tech)),
+        }));
+        setEditingId(null);
+        setEditingName("");
+        notify("Technician name updated.");
+      }
+
+      function deleteTechnician(id) {
+        const tech = getTechnician(id);
+        if (!tech || !window.confirm(`Remove ${tech.name}?`)) return;
+
+        setData((previous) => ({
+          ...previous,
+          technicians: previous.technicians.filter((t) => t.id !== id),
+          standby: previous.standby.filter((item) => item !== id),
+          turnPosition: previous.turnPosition.filter((item) => item !== id),
+          starredIds: previous.starredIds.filter((item) => item !== id),
+        }));
+        setEditingId(null);
+        notify(`${tech.name} removed.`);
+      }
+
+      function addToStandby(id) {
+        if (data.standby.includes(id)) return notify("Already in Standby.");
+        setData((previous) => ({
+          ...previous,
+          standby: [...previous.standby, id],
+        }));
+        notify("Added to Standby.");
+      }
+
+      function removeFromStandby(id) {
+        setData((previous) => ({
+          ...previous,
+          standby: previous.standby.filter((item) => item !== id),
+        }));
+      }
+
+      function moveStandby(index, direction) {
+        setData((previous) => ({
+          ...previous,
+          standby: moveItem(previous.standby, index, direction),
+        }));
+      }
+
+      function toggleStar(id) {
+        setData((previous) => ({
+          ...previous,
+          starredIds: previous.starredIds.includes(id)
+            ? previous.starredIds.filter((item) => item !== id)
+            : [...previous.starredIds, id],
+        }));
+      }
+
+      function callTechnicianFromStandby(id) {
+        const tech = getTechnician(id);
+        if (!tech) return notify("Technician not found.");
+
+        setData((previous) => {
+          const beforePosition = [...previous.turnPosition];
+          const currentPosition = previous.turnPosition.filter((item) => item !== id);
+          const nextPosition = [...currentPosition, id];
+          const timestamp = new Date().toISOString();
+
+          const entry = {
+            id: Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7),
+            techId: id,
+            techName: tech.name,
+            turnNo: previous.history.length + 1,
+            timestamp,
+            beforePosition,
+          };
+
+          return {
+            ...previous,
+            turnPosition: nextPosition,
+            history: [...previous.history, entry],
+            standby: previous.standby.filter((item) => item !== id),
+          };
+        });
+
+        notify(`${tech.name} called from Standby.`);
+      }
+
+      function callTechnician(id) {
+        const tech = getTechnician(id);
+        if (!tech) return notify("Technician not found.");
+
+        setData((previous) => {
+          const beforePosition = [...previous.turnPosition];
+          const currentPosition = previous.turnPosition.filter((item) => item !== id);
+          const nextPosition = [...currentPosition, id];
+          const timestamp = new Date().toISOString();
+
+          const entry = {
+            id: Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7),
+            techId: id,
+            techName: tech.name,
+            turnNo: previous.history.length + 1,
+            timestamp,
+            beforePosition,
+          };
+
+          return {
+            ...previous,
+            turnPosition: nextPosition,
+            history: [...previous.history, entry],
+          };
+        });
+
+        notify(`${tech.name} called.`);
+      }
+
+      function moveTurnPosition(index, direction) {
+        setData((previous) => ({
+          ...previous,
+          turnPosition: moveItem(previous.turnPosition, index, direction),
+        }));
+      }
+
+      function undoLastCall() {
+        if (data.history.length === 0) return notify("There is no call to undo.");
+        const lastName = data.history[data.history.length - 1].techName;
+
+        setData((previous) => {
+          const lastEntry = previous.history[previous.history.length - 1];
+          if (!lastEntry) return previous;
+          return {
+            ...previous,
+            history: previous.history.slice(0, -1),
+            turnPosition: Array.isArray(lastEntry.beforePosition)
+              ? lastEntry.beforePosition.filter((id) => previous.technicians.some((tech) => tech.id === id))
+              : previous.turnPosition,
+          };
+        });
+
+        notify(`Last call for ${lastName} undone.`);
+      }
+
+      function startNewDay() {
+        db.runTransaction(async (tx) => {
+          const snap = await tx.get(STATE_REF);
+          const previous = snap.exists ? normalize(snap.data()) : readLocal().state;
+
+          if (previous.history.length > 0) {
+            const id = Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+            tx.set(db.collection(ARCHIVE_COLLECTION).doc(id), {
+              id,
+              date: previous.businessDate,
+              history: archiveHistory(previous.history),
+              createdAt: Date.now(),
+            });
+          }
+
+          tx.set(STATE_REF, {
+            ...previous,
+            history: [],
+            standby: [],
+            turnPosition: [],
+            starredIds: [],
+            standbyVisible: true,
+            businessDate: todayString(),
+          });
+        });
+
+        setEditingOrder(false);
+        setConfirmNewDay(false);
+        notify("New day started.");
+      }
+
+      if (!data) return (
+        <div class="min-h-screen bg-brand-cream flex items-center justify-center p-6 text-brand-charcoal">
+          <div class="flex items-center gap-3 bg-white px-6 py-4 rounded-2xl border border-brand-borderGold shadow-sm">
+            <i class="fa-solid fa-circle-notch animate-spin text-brand-gold text-lg"></i>
+            <span class="font-serif font-medium text-base tracking-wide">Loading Luxury Salon System...</span>
+          </div>
+        </div>
+      );
+
+      const availableForStandby = data.technicians.filter((tech) => !data.standby.includes(tech.id));
+      const activeStandbyTechnicians = data.standby.map((id) => getTechnician(id)).filter(Boolean);
+      const activeTurnTechnicians = data.turnPosition.map((id) => getTechnician(id)).filter(Boolean);
+      const starredInTurn = activeTurnTechnicians.filter((tech) => data.starredIds.includes(tech.id));
+
+      return (
+        <div class="min-h-screen bg-brand-cream text-brand-charcoal flex flex-col justify-between">
+          
+          {/* HEADER / NAVIGATION BAR */}
+          <header class="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-brand-borderLight shadow-sm">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-brand-lightGold border border-brand-borderGold flex items-center justify-center text-brand-gold shadow-sm">
+                  <i class="fa-solid fa-[#C5A059] fa-gem text-lg"></i>
+                </div>
+                <div>
+                  <h1 class="font-serif font-bold text-xl sm:text-2xl text-brand-charcoal tracking-tight">Nail Salon Call Manager</h1>
+                  <p class="text-[11px] uppercase tracking-widest text-brand-gold font-semibold">Turn Tracking & Management</p>
+                </div>
+              </div>
+
+              <div class="flex items-center gap-3">
+                <div class="hidden sm:flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-brand-warmIvory border border-brand-borderLight text-xs text-brand-softSlate">
+                  <i class="fa-regular fa-calendar text-brand-gold"></i>
+                  <span>Business Date: <strong class="text-brand-charcoal font-semibold">{data.businessDate}</strong></span>
+                </div>
+                <div class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" title="Real-time Sync Active"></div>
+              </div>
+            </div>
+          </header>
+
+          {/* MAIN WRAPPER */}
+          <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full flex-grow space-y-8">
+            
+            {/* HERO STATEMENT & TOAST */}
+            <div class="relative bg-white rounded-3xl p-6 sm:p-8 border border-brand-borderGold/60 shadow-sm overflow-hidden bg-[radial-gradient(#C5A059_1px,transparent_1px)] [background-size:24px_24px] [background-position:0_0] [background-color:rgba(255,255,255,0.95)]">
+              <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div>
+                  <span class="inline-block px-3 py-1 rounded-full bg-brand-lightGold text-brand-gold text-xs font-semibold uppercase tracking-wider mb-2 border border-brand-borderGold/50">High-End Salon System</span>
+                  <h2 class="font-serif text-2xl sm:text-3xl font-bold text-brand-charcoal">Real-Time Turn Dispatch</h2>
+                  <p class="text-sm text-brand-softSlate mt-1 max-w-xl">Synchronized live queue management for salon floor managers and technicians across all devices.</p>
+                </div>
+                
+                <div class="flex items-center gap-3">
+                  <div class="px-4 py-2.5 rounded-2xl bg-brand-warmIvory border border-brand-borderLight text-center min-w-[120px]">
+                    <span class="block text-[10px] uppercase tracking-wider text-brand-softSlate font-medium">In Queue</span>
+                    <span class="font-serif text-2xl font-bold text-brand-gold">{data.turnPosition.length}</span>
+                  </div>
+                  <div class="px-4 py-2.5 rounded-2xl bg-brand-warmIvory border border-brand-borderLight text-center min-w-[120px]">
+                    <span class="block text-[10px] uppercase tracking-wider text-brand-softSlate font-medium">Calls Today</span>
+                    <span class="font-serif text-2xl font-bold text-brand-charcoal">{data.history.length}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* TOAST NOTIFICATION */}
+              {message && (
+                <div class="mt-4 p-3.5 bg-brand-charcoal text-white text-xs sm:text-sm rounded-xl shadow-lg flex items-center justify-between animate-fade-in border border-brand-gold/40">
+                  <span class="flex items-center gap-2">
+                    <i class="fa-solid fa-circle-check text-brand-gold"></i>
+                    {message}
+                  </span>
+                  <i class="fa-solid fa-sparkles text-brand-gold text-xs"></i>
+                </div>
+              )}
+
+              {syncError && (
+                <div class="mt-4 p-3.5 bg-rose-50 border border-rose-200 text-rose-800 text-xs sm:text-sm rounded-xl flex items-center gap-2">
+                  <i class="fa-solid fa-triangle-exclamation text-rose-600"></i>
+                  <span>Connection issue detected. Changes will sync once back online.</span>
+                </div>
+              )}
+            </div>
+
+            {/* CORE SECTIONS GRID */}
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+              
+              {/* LEFT COLUMN: 1. TECHNICIANS & 2. STANDBY */}
+              <div class="space-y-8">
+                
+                {/* 1. NAIL TECH MANAGER */}
+                <section class="bg-white rounded-3xl p-6 border border-brand-borderLight shadow-sm transition hover:shadow-md">
+                  <div class="flex items-center justify-between pb-4 border-b border-brand-borderLight">
+                    <div>
+                      <h2 class="font-serif text-xl font-bold text-brand-charcoal flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-brand-gold"></span> 1. Nail Techs
+                      </h2>
+                      <p class="text-xs text-brand-softSlate mt-0.5">Active technician directory</p>
+                    </div>
+                    <span class="px-3 py-1 rounded-full bg-brand-warmIvory border border-brand-borderLight text-xs font-semibold text-brand-charcoal">
+                      {data.technicians.length} Total
+                    </span>
+                  </div>
+
+                  <form onSubmit={addTechnician} class="flex gap-2 my-5">
+                    <input
+                      type="text"
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      placeholder="Enter technician name..."
+                      class="flex-1 bg-brand-warmIvory border border-brand-borderLight rounded-2xl px-4 py-2.5 text-sm focus:outline-none focus:border-brand-gold focus:ring-1 focus:ring-brand-gold transition placeholder:text-slate-400"
+                    />
+                    <button
+                      type="submit"
+                      class="bg-brand-gold hover:bg-brand-goldHover text-white font-semibold text-xs uppercase tracking-wider px-5 py-2.5 rounded-2xl transition shadow-sm active:scale-95 flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <i class="fa-solid fa-plus text-xs"></i> Add
+                    </button>
+                  </form>
+
+                  {data.technicians.length === 0 ? (
+                    <div class="p-8 text-center bg-brand-warmIvory rounded-2xl border border-dashed border-brand-borderLight text-brand-softSlate text-sm">
+                      No technicians registered yet.
+                    </div>
+                  ) : (
+                    <div class="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
+                      {data.technicians.map((tech) => (
+                        <div key={tech.id} class="p-3.5 bg-brand-warmIvory/60 hover:bg-brand-lightGold/40 border border-brand-borderLight hover:border-brand-borderGold/60 rounded-2xl flex flex-wrap items-center justify-between gap-3 transition">
+                          {editingId === tech.id ? (
+                            <div class="flex items-center gap-2 w-full">
+                              <input
+                                type="text"
+                                value={editingName}
+                                onChange={(e) => setEditingName(e.target.value)}
+                                class="flex-1 bg-white border border-brand-gold rounded-xl px-3 py-1.5 text-sm font-semibold outline-none"
+                              />
+                              <button onClick={() => saveTechnicianName(tech.id)} class="px-3 py-1.5 bg-brand-gold text-white text-xs font-bold rounded-xl shadow-sm">Save</button>
+                              <button onClick={() => setEditingId(null)} class="px-3 py-1.5 bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl">Cancel</button>
+                            </div>
+                          ) : (
+                            <>
+                              <span class="font-bold text-brand-charcoal text-sm">{tech.name}</span>
+                              <div class="flex items-center gap-2">
+                                <button
+                                  onClick={() => callTechnician(tech.id)}
+                                  class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider px-3.5 py-1.5 rounded-xl transition shadow-sm active:scale-95 cursor-pointer"
+                                >
+                                  CALL
+                                </button>
+                                <button
+                                  onClick={() => { setEditingId(tech.id); setEditingName(tech.name); }}
+                                  class="px-2.5 py-1.5 bg-white border border-brand-borderLight hover:border-brand-gold text-brand-softSlate text-xs font-medium rounded-xl transition cursor-pointer"
+                                  title="Edit Name"
+                                >
+                                  <i class="fa-solid fa-pen"></i>
+                                </button>
+                                <button
+                                  onClick={() => deleteTechnician(tech.id)}
+                                  class="px-2.5 py-1.5 bg-white border border-brand-borderLight hover:border-rose-300 text-rose-600 text-xs font-medium rounded-xl transition cursor-pointer"
+                                  title="Delete"
+                                >
+                                  <i class="fa-solid fa-trash-can"></i>
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                {/* 2. STANDBY QUEUE */}
+                <section class="bg-white rounded-3xl p-6 border border-brand-borderLight shadow-sm transition hover:shadow-md">
+                  <div class="flex items-center justify-between pb-4 border-b border-brand-borderLight">
+                    <div>
+                      <h2 class="font-serif text-xl font-bold text-brand-charcoal flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-amber-500"></span> 2. Standby Queue
+                      </h2>
+                      <p class="text-xs text-brand-softSlate mt-0.5">Secondary waiting queue</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span class="px-3 py-1 rounded-full bg-amber-50 border border-amber-200 text-xs font-semibold text-amber-800">
+                        {data.standby.length} Waiting
+                      </span>
+                      <button
+                        onClick={() => setData((prev) => ({ ...prev, standbyVisible: !prev.standbyVisible }))}
+                        class="text-xs text-brand-softSlate hover:text-brand-charcoal underline cursor-pointer"
+                      >
+                        {data.standbyVisible ? "Hide" : "Show"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {data.standbyVisible && (
+                    <div class="mt-5 space-y-4">
+                      {data.standby.length === 0 ? (
+                        <div class="p-6 text-center bg-brand-warmIvory rounded-2xl border border-dashed border-brand-borderLight text-brand-softSlate text-xs">
+                          Standby queue is currently empty.
+                        </div>
+                      ) : (
+                        <div class="space-y-2.5 max-h-[320px] overflow-y-auto pr-1">
+                          {activeStandbyTechnicians.map((tech, index) => (
+                            <div key={tech.id} class="p-3.5 bg-brand-warmIvory/60 border border-brand-borderLight rounded-2xl flex items-center justify-between gap-3">
+                              <div class="flex items-center gap-3">
+                                <span class="w-6 h-6 rounded-lg bg-brand-lightGold text-brand-gold font-bold text-xs flex items-center justify-center border border-brand-borderGold/50">
+                                  {index + 1}
+                                </span>
+                                <span class="font-bold text-brand-charcoal text-sm">{tech.name}</span>
+                              </div>
+                              <div class="flex items-center gap-1.5">
+                                <button
+                                  disabled={index === 0}
+                                  onClick={() => moveStandby(index, -1)}
+                                  class="w-7 h-7 bg-white border border-brand-borderLight rounded-lg text-xs font-bold disabled:opacity-30 cursor-pointer"
+                                >
+                                  ↑
+                                </button>
+                                <button
+                                  disabled={index === data.standby.length - 1}
+                                  onClick={() => moveStandby(index, 1)}
+                                  class="w-7 h-7 bg-white border border-brand-borderLight rounded-lg text-xs font-bold disabled:opacity-30 cursor-pointer"
+                                >
+                                  ↓
+                                </button>
+                                <button
+                                  onClick={() => callTechnicianFromStandby(tech.id)}
+                                  class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider px-3 py-1.5 rounded-xl transition shadow-sm ml-1 cursor-pointer"
+                                >
+                                  CALL
+                                </button>
+                                <button
+                                  onClick={() => removeFromStandby(tech.id)}
+                                  class="px-2 py-1.5 text-rose-600 text-xs hover:bg-rose-50 rounded-lg cursor-pointer"
+                                >
+                                  <i class="fa-solid fa-xmark"></i>
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {availableForStandby.length > 0 && (
+                        <div class="pt-3 border-t border-brand-borderLight">
+                          <p class="text-xs text-brand-softSlate mb-2 font-medium">Add technician to Standby:</p>
+                          <div class="flex flex-wrap gap-1.5">
+                            {availableForStandby.map((tech) => (
+                              <button
+                                key={tech.id}
+                                onClick={() => addToStandby(tech.id)}
+                                class="px-3 py-1.5 bg-brand-warmIvory hover:bg-brand-lightGold border border-brand-borderLight hover:border-brand-borderGold rounded-xl text-xs font-semibold text-brand-charcoal transition cursor-pointer"
+                              >
+                                + {tech.name}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </section>
+
+              </div>
+
+              {/* RIGHT COLUMN: 3. LIVE TURN POSITION (STRICT SINGLE VERTICAL COLUMN) */}
+              <div class="space-y-8">
+                
+                <section class="bg-white rounded-3xl p-6 border-2 border-brand-borderGold/70 shadow-md relative overflow-hidden">
+                  
+                  {/* CARD HEADER */}
+                  <div class="flex items-center justify-between pb-4 border-b border-brand-borderLight">
+                    <div>
+                      <h2 class="font-serif text-xl font-bold text-brand-charcoal flex items-center gap-2">
+                        <i class="fa-solid fa-crown text-brand-gold text-base"></i> 3. Live Turn Position
+                      </h2>
+                      <p class="text-xs text-brand-softSlate mt-0.5">Active rotation order for floor manager</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span class="px-3 py-1 rounded-full bg-brand-lightGold border border-brand-borderGold text-xs font-bold text-brand-gold">
+                        {data.turnPosition.length} Active
+                      </span>
+                      <button
+                        onClick={() => setEditingOrder(!editingOrder)}
+                        class={`px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+                          editingOrder ? "bg-brand-gold text-white" : "bg-brand-warmIvory text-brand-charcoal border border-brand-borderLight"
+                        }`}
+                      >
+                        {editingOrder ? "Done" : "Reorder"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* STRICT NAME-ONLY PRIORITY ALERT BANNER */}
+                  {starredInTurn.length > 0 && (
+                    <div class="priority-banner my-5 p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-500/15 to-amber-500/10 border-2 border-brand-gold text-center">
+                      <div class="flex items-center justify-center gap-2 mb-1">
+                        <i class="fa-solid fa-star text-brand-gold animate-bounce text-sm"></i>
+                        <span class="font-serif font-bold text-brand-gold text-xs uppercase tracking-widest">Priority Technicians</span>
+                        <i class="fa-solid fa-star text-brand-gold animate-bounce text-sm"></i>
+                      </div>
+                      <div class="font-serif text-2xl font-bold text-brand-charcoal tracking-wide">
+                        {starredInTurn.map((t) => t.name).join(", ")}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TURN LIST - STRICT SINGLE VERTICAL COLUMN */}
+                  {data.turnPosition.length === 0 ? (
+                    <div class="my-6 p-10 text-center bg-brand-warmIvory rounded-2xl border border-dashed border-brand-borderLight">
+                      <i class="fa-solid fa-user-clock text-3xl text-brand-gold/40 mb-2"></i>
+                      <p class="font-serif text-base font-semibold text-brand-charcoal">Queue is Empty</p>
+                      <p class="text-xs text-brand-softSlate mt-1">Press CALL in Nail Techs or Standby to dispatch to queue.</p>
+                    </div>
+                  ) : (
+                    <div class="my-5 flex flex-col gap-3 w-full max-h-[520px] overflow-y-auto pr-1">
+                      {activeTurnTechnicians.map((tech, index) => {
+                        const isStarred = data.starredIds.includes(tech.id);
+                        return (
+                          <div
+                            key={tech.id}
+                            class={`w-full p-4 rounded-2xl border transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                              isStarred
+                                ? "bg-amber-500/10 border-brand-gold shadow-sm ring-1 ring-brand-gold/30"
+                                : index === 0
+                                ? "bg-brand-lightGold/60 border-brand-borderGold shadow-sm"
+                                : "bg-brand-warmIvory/60 border-brand-borderLight hover:border-brand-borderGold/50"
+                            }`}
+                          >
+                            <div class="flex items-center gap-3.5">
+                              <div class={`w-9 h-9 rounded-xl flex items-center justify-center font-serif font-bold text-sm ${
+                                index === 0 ? "bg-brand-gold text-white shadow-sm" : "bg-white text-brand-charcoal border border-brand-borderLight"
+                              }`}>
+                                #{index + 1}
+                              </div>
+                              <div>
+                                <div class="font-bold text-brand-charcoal text-base flex items-center gap-2">
+                                  {tech.name}
+                                  {isStarred && <span class="text-brand-gold font-black">★</span>}
+                                  {index === 0 && <span class="text-[10px] uppercase tracking-wider font-bold bg-brand-gold text-white px-2 py-0.5 rounded-full">Next Up</span>}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div class="flex items-center gap-2 self-end sm:self-auto">
+                              <button
+                                onClick={() => toggleStar(tech.id)}
+                                class={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
+                                  isStarred
+                                    ? "bg-brand-gold text-white shadow-sm"
+                                    : "bg-white border border-brand-borderLight text-brand-softSlate hover:border-brand-gold"
+                                }`}
+                              >
+                                {isStarred ? "★ Priority" : "☆ Priority"}
+                              </button>
+
+                              {editingOrder && (
+                                <div class="flex items-center gap-1">
+                                  <button
+                                    disabled={index === 0}
+                                    onClick={() => moveTurnPosition(index, -1)}
+                                    class="w-7 h-7 bg-white border border-brand-borderLight rounded-lg text-xs font-bold disabled:opacity-30 cursor-pointer"
+                                  >
+                                    ↑
+                                  </button>
+                                  <button
+                                    disabled={index === data.turnPosition.length - 1}
+                                    onClick={() => moveTurnPosition(index, 1)}
+                                    class="w-7 h-7 bg-white border border-brand-borderLight rounded-lg text-xs font-bold disabled:opacity-30 cursor-pointer"
+                                  >
+                                    ↓
+                                  </button>
+                                </div>
+                              )}
+
+                              <button
+                                onClick={() => callTechnician(tech.id)}
+                                class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider px-4 py-1.5 rounded-xl transition shadow-sm active:scale-95 cursor-pointer"
+                              >
+                                CALL
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <p class="text-[11px] text-brand-softSlate italic text-center pt-2 border-t border-brand-borderLight">
+                    Marking with priority star (*) alerts the floor manager without auto-changing queue order.
+                  </p>
+                </section>
+
+              </div>
+
+            </div>
+
+            {/* LOWER SECTION: 4. TURN HISTORY & 5. NEW DAY / ARCHIVE */}
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              
+              {/* 4. TURN HISTORY (2 COLS) */}
+              <section class="lg:col-span-2 bg-white rounded-3xl p-6 border border-brand-borderLight shadow-sm">
+                <div class="flex items-center justify-between pb-4 border-b border-brand-borderLight">
+                  <div>
+                    <h2 class="font-serif text-xl font-bold text-brand-charcoal flex items-center gap-2">
+                      <i class="fa-solid fa-clock-rotate-left text-brand-gold text-sm"></i> 4. Daily Turn History
+                    </h2>
+                    <p class="text-xs text-brand-softSlate mt-0.5">Logged calls for current business day</p>
+                  </div>
+                  <button
+                    disabled={data.history.length === 0}
+                    onClick={undoLastCall}
+                    class="px-4 py-2 bg-brand-warmIvory hover:bg-rose-50 border border-brand-borderLight hover:border-rose-200 text-rose-700 text-xs font-bold rounded-xl transition disabled:opacity-40 cursor-pointer flex items-center gap-1.5"
+                  >
+                    <i class="fa-solid fa-rotate-left text-xs"></i> UNDO LAST CALL
+                  </button>
+                </div>
+
+                {data.history.length === 0 ? (
+                  <div class="p-8 text-center bg-brand-warmIvory rounded-2xl border border-dashed border-brand-borderLight text-brand-softSlate text-xs my-5">
+                    No turn calls recorded for today.
+                  </div>
+                ) : (
+                  <div class="overflow-x-auto my-5">
+                    <table class="w-full text-left border-collapse">
+                      <thead>
+                        <tr class="bg-brand-warmIvory text-brand-softSlate uppercase text-[11px] tracking-wider border-b border-brand-borderLight">
+                          <th class="p-3 font-semibold">Turn #</th>
+                          <th class="p-3 font-semibold">Technician</th>
+                          <th class="p-3 font-semibold">Date</th>
+                          <th class="p-3 font-semibold text-right">Time</th>
+                        </tr>
+                      </thead>
+                      <tbody class="divide-y divide-brand-borderLight text-xs">
+                        {[...data.history].reverse().map((entry) => (
+                          <tr key={entry.id} class="hover:bg-brand-lightGold/30 transition">
+                            <td class="p-3 font-serif font-bold text-brand-gold">#{entry.turnNo}</td>
+                            <td class="p-3 font-bold text-brand-charcoal">{entry.techName}</td>
+                            <td class="p-3 text-brand-softSlate">{formatDate(entry.timestamp)}</td>
+                            <td class="p-3 text-right text-brand-softSlate font-mono">{formatTime(entry.timestamp)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+
+              {/* 5. NEW DAY & ARCHIVE (1 COL) */}
+              <div class="space-y-8">
+                
+                {/* NEW DAY CARD */}
+                <section class="bg-white rounded-3xl p-6 border border-brand-borderLight shadow-sm">
+                  <div class="pb-3 border-b border-brand-borderLight">
+                    <h2 class="font-serif text-xl font-bold text-brand-charcoal flex items-center gap-2">
+                      <i class="fa-solid fa-sun text-amber-500 text-sm"></i> 5. Start New Day
+                    </h2>
+                    <p class="text-xs text-brand-softSlate mt-0.5">Archive history and clear queues</p>
+                  </div>
+
+                  {!confirmNewDay ? (
+                    <button
+                      onClick={() => setConfirmNewDay(true)}
+                      class="w-full mt-5 py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs uppercase tracking-wider rounded-2xl transition shadow-sm active:scale-95 cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      <i class="fa-solid fa-power-off text-xs"></i> Start New Day
+                    </button>
+                  ) : (
+                    <div class="mt-4 p-4 bg-rose-50 border border-rose-200 rounded-2xl space-y-3">
+                      <p class="text-xs text-rose-800 font-medium">Archive today's calls and reset turn position queue for tomorrow?</p>
+                      <div class="flex gap-2">
+                        <button
+                          onClick={startNewDay}
+                          class="flex-1 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-sm cursor-pointer"
+                        >
+                          Confirm Reset
+                        </button>
+                        <button
+                          onClick={() => setConfirmNewDay(false)}
+                          class="px-4 py-2 bg-white border border-slate-300 text-slate-700 font-semibold text-xs rounded-xl cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </section>
+
+                {/* ARCHIVE DRAWER */}
+                <section class="bg-white rounded-3xl p-6 border border-brand-borderLight shadow-sm">
+                  <div class="flex items-center justify-between pb-3 border-b border-brand-borderLight">
+                    <h2 class="font-serif text-lg font-bold text-brand-charcoal flex items-center gap-2">
+                      <i class="fa-solid fa-box-archive text-brand-gold text-xs"></i> Past Archives
+                    </h2>
+                    <span class="text-xs font-semibold text-brand-softSlate">{archive.length} Days</span>
+                  </div>
+
+                  <div class="mt-4 space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                    {archive.length === 0 ? (
+                      <p class="text-xs text-brand-softSlate text-center py-4 italic">No archived days stored.</p>
+                    ) : (
+                      archive.map((day) => (
+                        <details key={day.id} class="group border border-brand-borderLight rounded-xl bg-brand-warmIvory/60 overflow-hidden text-xs">
+                          <summary class="p-3 font-semibold text-brand-charcoal cursor-pointer flex justify-between items-center group-open:bg-brand-lightGold/50">
+                            <span>{day.date}</span>
+                            <span class="text-[10px] px-2 py-0.5 rounded-full bg-white text-brand-gold border border-brand-borderGold">{day.history.length} Calls</span>
+                          </summary>
+                          <div class="p-3 bg-white border-t border-brand-borderLight space-y-1">
+                            {day.history.map((h, i) => (
+                              <div key={i} class="flex justify-between text-[11px] text-brand-softSlate py-0.5">
+                                <span>#{h.turnNo} {h.techName}</span>
+                                <span class="font-mono">{formatTime(h.timestamp)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      ))
+                    )}
+                  </div>
+                </section>
+
+              </div>
+
+            </div>
+
+          </main>
+
+          {/* FOOTER */}
+          <footer class="bg-white border-t border-brand-borderLight py-6 mt-12 text-center text-xs text-brand-softSlate">
+            <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <span class="font-serif font-bold text-brand-charcoal">Nail Salon Management System</span>
+              <span class="flex items-center gap-1.5">
+                <i class="fa-solid fa-cloud text-brand-gold text-xs"></i> Shared Real-Time Firebase Cloud Sync Active
+              </span>
+            </div>
+          </footer>
+
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
+</body>
+</html>
