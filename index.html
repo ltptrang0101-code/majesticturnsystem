@@ -316,7 +316,8 @@
       { id: 's3', name: 'Full Set', turns: 1.0 },
       { id: 's4', name: 'Deluxe Pedi', turns: 1.0 },
       { id: 's5', name: 'Gel Pedi', turns: 1.5 },
-      { id: 's6', name: 'Dip Powder', turns: 1.0 }
+      { id: 's6', name: 'Dip Powder', turns: 1.0 },
+      { id: 's7', name: 'App', turns: 1.0 }
     ];
 
     let techs = [];
@@ -544,7 +545,7 @@
           `).join('');
     }
 
-    // ---------- RENDER COMPACT SERVICE PANEL ----------
+    // ---------- RENDER COMPACT SERVICE PANEL (Phân biệt màu sắc riêng cho ô App) ----------
     function renderServicePanel() {
       const panel = document.getElementById('service-squares-panel');
       const clearBtn = document.getElementById('clear-sel-btn');
@@ -559,13 +560,27 @@
 
       panel.innerHTML = sortedServices.map(s => {
         const shortName = shortenServiceName(s.name);
+        // Kiểm tra nếu tên dịch vụ là App (hoặc Appointment) thì dùng màu sắc khác biệt (tông Amber/Cam)
+        const isApp = s.name.toLowerCase() === 'app' || s.name.toLowerCase() === 'appointment';
+
+        const boxClass = isApp
+          ? "service-box bg-amber-50 hover:bg-amber-600 hover:text-white border border-amber-300 hover:border-amber-600 p-3 rounded-2xl flex flex-col justify-between items-center text-center transition-all duration-150 shadow-sm active:scale-95 cursor-pointer group"
+          : "service-box bg-slate-50 hover:bg-indigo-600 hover:text-white border border-slate-200 hover:border-indigo-600 p-3 rounded-2xl flex flex-col justify-between items-center text-center transition-all duration-150 shadow-sm active:scale-95 cursor-pointer group";
+
+        const badgeClass = isApp
+          ? "text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 group-hover:bg-amber-500 group-hover:text-white transition"
+          : "text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 group-hover:bg-indigo-500 group-hover:text-white transition";
+
+        const textClass = isApp
+          ? "text-sm font-bold leading-tight line-clamp-2 my-auto group-hover:text-white text-amber-900"
+          : "text-sm font-bold leading-tight line-clamp-2 my-auto group-hover:text-white text-slate-800";
+
         return `
-          <button onclick="assignSelectedService('${s.id}')" 
-                  class="service-box bg-slate-50 hover:bg-indigo-600 hover:text-white border border-slate-200 hover:border-indigo-600 p-3 rounded-2xl flex flex-col justify-between items-center text-center transition-all duration-150 shadow-sm active:scale-95 cursor-pointer group">
-            <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 group-hover:bg-indigo-500 group-hover:text-white transition">
+          <button onclick="assignSelectedService('${s.id}')" class="${boxClass}">
+            <span class="${badgeClass}">
               +${s.turns} Turn${s.turns > 1 ? 's' : ''}
             </span>
-            <span class="text-sm font-bold leading-tight line-clamp-2 my-auto group-hover:text-white text-slate-800">
+            <span class="${textClass}">
               ${esc(shortName)}
             </span>
           </button>
