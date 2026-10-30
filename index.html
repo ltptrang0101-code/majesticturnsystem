@@ -90,11 +90,16 @@
 
             <!-- QUEUE TABLE / CARDS -->
             <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80">
-              <div class="flex justify-between items-center mb-4">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
                 <h3 class="text-lg font-bold text-slate-800 flex items-center gap-2">
                   <i class="fa-solid fa-arrow-down-1-9 text-indigo-600"></i> Turn Queue Standings
                 </h3>
-                <span class="text-xs text-slate-500 font-medium hidden sm:inline">Click tech to highlight → Click service on right</span>
+                <div class="flex items-center gap-2">
+                  <button onclick="toggleEditOrder()" id="edit-order-btn" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-3 py-1.5 rounded-xl transition cursor-pointer flex items-center gap-1.5">
+                    <i class="fa-solid fa-sort"></i> <span id="edit-order-text">Edit Order</span>
+                  </button>
+                  <span class="text-xs text-slate-500 font-medium hidden md:inline">Click tech to highlight</span>
+                </div>
               </div>
               <div id="queue-list" class="space-y-3">
                 <!-- Tech Queue Items rendered here -->
@@ -325,6 +330,7 @@
     let logs = [];
     
     let selectedTechId = null;
+    let isEditingOrder = false;
 
     document.addEventListener('DOMContentLoaded', () => {
       db.collection("nail_salon").doc("shared_state").onSnapshot((doc) => {
@@ -398,6 +404,48 @@
           if (a.signIn !== b.signIn) return a.signIn - b.signIn;
           return String(a.id).localeCompare(String(b.id));
         });
+    }
+
+    function toggleEditOrder() {
+      isEditingOrder = !isEditingOrder;
+      const btn = document.getElementById('edit-order-btn');
+      const txt = document.getElementById('edit-order-text');
+      if (isEditingOrder) {
+        btn.classList.add('bg-indigo-600', 'text-white');
+        btn.classList.remove('bg-slate-100', 'text-slate-700');
+        txt.innerText = 'Done Ordering';
+      } else {
+        btn.classList.remove('bg-indigo-600', 'text-white');
+        btn.classList.add('bg-slate-100', 'text-slate-700');
+        txt.innerText = 'Edit Order';
+      }
+      renderQueue();
+    }
+
+    function moveQueueOrder(techId, direction) {
+      const activeTechs = getSortedActiveTechs();
+      const index = activeTechs.findIndex(t => t.id === techId);
+      if (index === -1) return;
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= activeTechs.length) return;
+
+      const currentTech = activeTechs[index];
+      const targetTech = activeTechs[targetIndex];
+
+      const tempSignIn = currentTech.signIn;
+      currentTech.signIn = targetTech.signIn;
+      targetTech.signIn = tempSignIn;
+
+      if (currentTech.signIn === targetTech.signIn) {
+        if (direction < 0) {
+          currentTech.signIn -= 1;
+        } else {
+          currentTech.signIn += 1;
+        }
+      }
+
+      saveState();
+      renderAll();
     }
 
     function updateSignIn(techId, value) {
@@ -515,14 +563,24 @@
             </div>
 
             <div class="flex items-center gap-2 self-end sm:self-auto" onclick="event.stopPropagation()">
-              <div class="flex items-center space-x-1 bg-slate-100 border border-slate-200 rounded-xl p-1">
-                <button onclick="adjustTurns('${tech.id}', -0.5)" class="w-7 h-7 flex items-center justify-center hover:bg-white rounded-lg text-slate-700 font-bold text-xs transition cursor-pointer" title="Minus 0.5 turn">-0.5</button>
-                <button onclick="adjustTurns('${tech.id}', 0.5)" class="w-7 h-7 flex items-center justify-center hover:bg-white rounded-lg text-slate-700 font-bold text-xs transition cursor-pointer" title="Add 0.5 turn">+0.5</button>
-              </div>
-
-              <button onclick="toggleTechStatus('${tech.id}')" class="text-xs bg-slate-100 hover:bg-amber-100 hover:text-amber-800 text-slate-600 p-2.5 rounded-xl font-semibold transition cursor-pointer" title="Put on Break">
-                <i class="fa-solid fa-pause"></i>
-              </button>
+              ${isEditingOrder ? `
+                <div class="flex items-center space-x-1 bg-slate-100 border border-slate-200 rounded-xl p-1">
+                  <button onclick="moveQueueOrder('${tech.id}', -1)" ${index === 0 ? 'disabled class="w-7 h-7 flex items-center justify-center text-slate-300 rounded-lg text-xs cursor-not-allowed"' : 'class="w-7 h-7 flex items-center justify-center hover:bg-white rounded-lg text-slate-700 font-bold text-xs transition cursor-pointer"'} title="Move Up">
+                    <i class="fa-solid fa-arrow-up"></i>
+                  </button>
+                  <button onclick="moveQueueOrder('${tech.id}', 1)" ${index === activeTechs.length - 1 ? 'disabled class="w-7 h-7 flex items-center justify-center text-slate-300 rounded-lg text-xs cursor-not-allowed"' : 'class="w-7 h-7 flex items-center justify-center hover:bg-white rounded-lg text-slate-700 font-bold text-xs transition cursor-pointer"'} title="Move Down">
+                    <i class="fa-solid fa-arrow-down"></i>
+                  </button>
+                </div>
+              ` : `
+                <div class="flex items-center space-x-1 bg-slate-100 border border-slate-200 rounded-xl p-1">
+                  <button onclick="adjustTurns('${tech.id}', -0.5)" class="w-7 h-7 flex items-center justify-center hover:bg-white rounded-lg text-slate-700 font-bold text-xs transition cursor-pointer" title="Minus 0.5 turn">-0.5</button>
+                  <button onclick="adjustTurns('${tech.id}', 0.5)" class="w-7 h-7 flex items-center justify-center hover:bg-white rounded-lg text-slate-700 font-bold text-xs transition cursor-pointer" title="Add 0.5 turn">+0.5</button>
+                </div>
+                <button onclick="toggleTechStatus('${tech.id}')" class="text-xs bg-slate-100 hover:bg-amber-100 hover:text-amber-800 text-slate-600 p-2.5 rounded-xl font-semibold transition cursor-pointer" title="Put on Break">
+                  <i class="fa-solid fa-pause"></i>
+                </button>
+              `}
             </div>
           `;
           queueList.appendChild(card);
@@ -545,7 +603,7 @@
           `).join('');
     }
 
-    // ---------- RENDER COMPACT SERVICE PANEL (Phân biệt màu sắc riêng cho ô App) ----------
+    // ---------- RENDER COMPACT SERVICE PANEL ----------
     function renderServicePanel() {
       const panel = document.getElementById('service-squares-panel');
       const clearBtn = document.getElementById('clear-sel-btn');
@@ -560,7 +618,6 @@
 
       panel.innerHTML = sortedServices.map(s => {
         const shortName = shortenServiceName(s.name);
-        // Kiểm tra nếu tên dịch vụ là App (hoặc Appointment) thì dùng màu sắc khác biệt (tông Amber/Cam)
         const isApp = s.name.toLowerCase() === 'app' || s.name.toLowerCase() === 'appointment';
 
         const boxClass = isApp
